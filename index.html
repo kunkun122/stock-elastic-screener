@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>股价高弹性筛选工作台</title>
+<link rel="stylesheet" href="style.css">
+<script>
+  /* 最早捕获 JS 加载/执行错误 */
+  window.__bootErrors = [];
+  window.addEventListener('error', function(e) {
+    window.__bootErrors.push({msg: e.message || String(e.error), src: e.filename, line: e.lineno});
+    try {
+      var es = document.getElementById('emptyState');
+      if (es) es.innerHTML =
+        '<div class="empty-icon">⚠</div><p>脚本加载出错</p>' +
+        '<p class="muted">' + (e.message || e.filename || '未知脚本错误') + '</p>';
+    } catch(_) {}
+  });
+</script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">◈</span>
+    <div>
+      <h1>股价高弹性筛选工作台</h1>
+      <p class="sub">四类核心指标 · β / 波动 / 量能 / 形态</p>
+    </div>
+  </div>
+  <div class="status">
+    <span id="dotStatus" class="dot"></span>
+    <span id="txtStatus">连接中…</span>
+    <span id="txtTime" class="muted"></span>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- ============ 左侧参数面板 ============ -->
+  <aside class="sidebar">
+    <div class="panel-title">筛选参数</div>
+
+    <div class="form-group">
+      <label id="lblPool">股票池</label>
+      <select id="selPool"></select>
+    </div>
+
+    <!-- 自选股导入（选「自选股」时展开） -->
+    <div class="form-group hidden" id="grpCustom">
+      <label>自选股代码</label>
+      <textarea id="inpCustom" rows="6"
+        placeholder="粘贴代码，逗号 / 空格 / 顿号 / 换行均可&#10;支持 600000、sh600000、600000.SH&#10;例：600519, 000858 300750&#10;　　601318、002594"></textarea>
+
+      <div class="import-row">
+        <input type="file" id="fileCustom" accept=".txt,.csv,.tsv" class="hidden">
+        <button type="button" id="btnPickFile" class="btn-mini">选择文件</button>
+        <button type="button" id="btnImport" class="btn-mini primary">导入</button>
+      </div>
+      <div class="hint" id="fileCustomName"></div>
+      <div class="custom-status" id="hintCustom"></div>
+    </div>
+
+    <div class="form-group">
+      <label>β 计算基准</label>
+      <select id="selBench"></select>
+    </div>
+
+    <div class="form-group">
+      <label>风格预设</label>
+      <select id="selStyle"></select>
+      <div class="hint" id="hintStyle"></div>
+    </div>
+
+    <div class="form-group" id="grpDepth">
+      <label>精算深度</label>
+      <select id="selDepth">
+        <option value="150">快速 · 精算 150 只</option>
+        <option value="300" selected>标准 · 精算 300 只</option>
+        <option value="1000">深度 · 精算 1000 只</option>
+      </select>
+      <div class="hint">候选越多耗时越长</div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="form-group">
+      <label>β 系数区间</label>
+      <div class="range-row">
+        <input type="number" id="betaMin" value="1.2" step="0.1">
+        <span class="tilde">~</span>
+        <input type="number" id="betaMax" value="2.0" step="0.1">
+      </div>
+      <div class="hint">0 = 不限制</div>
+    </div>
+
+    <div class="form-group">
+      <label>年化波动率 ≥ <b id="lblVol">30</b>%</label>
+      <input type="range" id="volMin" min="10" max="80" step="1" value="30">
+    </div>
+
+    <div class="form-group">
+      <label>近20日均振幅 ≥ <b id="lblAmp">2.0</b>%</label>
+      <input type="range" id="ampMin" min="0" max="8" step="0.1" value="2">
+    </div>
+
+    <div class="form-group">
+      <label>近20日均换手率 ≥ <b id="lblTurn">0.8</b>%</label>
+      <input type="range" id="turnMin" min="0" max="6" step="0.1" value="0.8">
+    </div>
+
+    <div class="form-group">
+      <label>当日量比 ≥ <b id="lblVr">0</b></label>
+      <input type="range" id="vrMin" min="0" max="3" step="0.1" value="0">
+    </div>
+
+    <div class="form-group">
+      <label>流通市值 (亿)</label>
+      <div class="range-row">
+        <input type="number" id="mvMin" value="0" step="10">
+        <span class="tilde">~</span>
+        <input type="number" id="mvMax" value="100000" step="100">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>返回前 N 只</label>
+      <input type="number" id="topN" value="30" min="5" max="200" step="5">
+    </div>
+
+    <button id="btnScreen" class="btn-primary">开始筛选</button>
+    <button id="btnReset" class="btn-ghost">恢复默认</button>
+  </aside>
+
+  <!-- ============ 主内容区 ============ -->
+  <main class="content">
+    <nav class="tabs">
+      <button class="tab active" data-tab="screen">筛选结果</button>
+      <button class="tab" data-tab="diagnose">单只诊断</button>
+      <button class="tab" data-tab="method">方法论</button>
+    </nav>
+
+    <!-- ---------- Tab: 筛选结果 ---------- -->
+    <section id="tab-screen" class="tab-page active">
+      <div id="emptyState" class="empty">
+        <div class="empty-icon">◈</div>
+        <p>配置左侧参数后点击「开始筛选」</p>
+        <p class="muted">高弹性 = 对市场敏感 + 波动幅度大 + 资金活跃</p>
+      </div>
+
+      <div id="resultArea" class="hidden">
+        <div class="summary" id="summaryCards"></div>
+
+        <div class="chart-grid">
+          <div class="card">
+            <div class="card-title">β × 年化波动率（气泡=换手率）</div>
+            <div id="chartScatter" class="chart"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Top 20 综合得分</div>
+            <div id="chartBar" class="chart"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">形态信号分布</div>
+            <div id="chartPie" class="chart"></div>
+          </div>
+        </div>
+
+        <div class="table-head">
+          <div class="th-left">
+            <span id="tblInfo" class="muted"></span>
+          </div>
+          <button id="btnExport" class="btn-export">导出 Excel</button>
+        </div>
+
+        <div class="table-wrap">
+          <table id="tblResult">
+            <thead><tr id="tblHead"></tr></thead>
+            <tbody id="tblBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <p id="loadingText">正在拉取行情并计算四类指标…</p>
+        <p class="muted" id="loadingSub">精算耗时取决于候选数量，请稍候</p>
+      </div>
+    </section>
+
+    <!-- ---------- Tab: 单只诊断 ---------- -->
+    <section id="tab-diagnose" class="tab-page">
+      <div class="diag-search">
+        <input type="text" id="inpCode" placeholder="输入 6 位股票代码，如 000338">
+        <select id="selDiagBench"></select>
+        <button id="btnDiag" class="btn-primary">诊断</button>
+      </div>
+      <div class="quick">
+        <span class="muted">快捷：</span>
+        <button class="chip" data-code="000338">潍柴动力</button>
+        <button class="chip" data-code="000063">中兴通讯</button>
+        <button class="chip" data-code="000333">美的集团</button>
+        <button class="chip" data-code="000538">云南白药</button>
+      </div>
+
+      <div id="diagResult" class="hidden">
+        <div class="diag-head" id="diagHead"></div>
+        <div class="chart-grid-2">
+          <div class="card">
+            <div class="card-title">四类指标雷达图</div>
+            <div id="chartRadar" class="chart"></div>
+          </div>
+          <div class="card">
+            <div class="card-title" id="lblLineChart">近 120 日收盘走势</div>
+            <div id="chartLine" class="chart"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">指标明细</div>
+          <div class="metric-grid" id="diagMetrics"></div>
+        </div>
+      </div>
+      <div id="diagEmpty" class="empty">
+        <div class="empty-icon">◎</div>
+        <p>输入股票代码，查看单只标的的四类指标诊断</p>
+      </div>
+    </section>
+
+    <!-- ---------- Tab: 方法论 ---------- -->
+    <section id="tab-method" class="tab-page">
+      <div class="method">
+        <h2>高弹性 = 涨得猛也跌得狠</h2>
+        <p class="lead">对应三个核心特征：<b>对市场敏感</b> + <b>波动幅度大</b> + <b>资金活跃</b>，并用区间形态识别介入时机。</p>
+
+        <div class="four-cards">
+          <div class="mcard">
+            <div class="mnum">①</div>
+            <h3>市场敏感度</h3>
+            <div class="mformula">β = Cov(R<sub>i</sub>, R<sub>m</sub>) / Var(R<sub>m</sub>)</div>
+            <p>个股收益对大盘收益的回归斜率。β=2 时大盘 ±1%，个股预期 ±2%。</p>
+            <div class="warn">⚠ 高 β 两头接打：涨得快跌得也快，需配合止损或对冲</div>
+          </div>
+
+          <div class="mcard">
+            <div class="mnum">②</div>
+            <h3>波动幅度</h3>
+            <div class="mformula">年化波动率 = 日收益σ × √252</div>
+            <p>另看 ATR%（ATR÷股价）与振幅（(最高−最低)÷昨收）。</p>
+            <div class="warn">阈值参考：中小盘 ≥40%，大盘股 ≥30%</div>
+          </div>
+
+          <div class="mcard">
+            <div class="mnum">③</div>
+            <h3>量能活跃</h3>
+            <div class="mformula">量比 = 当日量 ÷ 近5日均量</div>
+            <p>换手率反映筹码周转速度，是高弹性的前提；量比是放量信号。</p>
+            <div class="warn">⚠ 换手虚高防对倒：需价配合（量增 + 价有趋势）</div>
+          </div>
+
+          <div class="mcard">
+            <div class="mnum">④</div>
+            <h3>区间形态</h3>
+            <div class="mformula">布林带宽 = (上轨−下轨) ÷ 中轨</div>
+            <p>区间幅度 = 近60日高低点空间。带宽收窄后走阔，常是变盘前兆。</p>
+            <div class="warn">分位 ≤25% 潜在变盘；≥75% 趋势进行中</div>
+          </div>
+        </div>
+
+        <div class="combo">
+          <h3>推荐首套组合</h3>
+          <p class="combo-formula">β ＋ 年化波动率 ＋ 振幅 ＋ 换手率</p>
+          <table class="combo-tbl">
+            <thead><tr><th>指标</th><th>推荐区间</th><th>含义</th></tr></thead>
+            <tbody>
+              <tr><td>β 系数</td><td>1.2 ~ 2.0</td><td>显著高于市场但不极端</td></tr>
+              <tr><td>年化波动率</td><td>≥40%（中小盘）/ ≥30%（大盘）</td><td>波动幅度明显</td></tr>
+              <tr><td>振幅</td><td>近20日均 ≥3%</td><td>日内有交易空间</td></tr>
+              <tr><td>换手率</td><td>≥1.5%（中小盘）/ ≥0.8%（大盘）</td><td>筹码活跃</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pitfalls">
+          <h3>避坑清单</h3>
+          <ul>
+            <li><b>高 β 两头接打</b> — β&gt;2.5 且无明确趋势时，配合严格止损或剔除</li>
+            <li><b>换手虚高对倒</b> — 换手率&gt;10% 但价格横盘、买卖价差大，需价升配合</li>
+            <li><b>带宽长期收窄</b> — 布林带宽持续低于 5%，流动性枯竭，避免参与</li>
+            <li><b>微盘股流动性差</b> — 市值 &lt;30 亿 + 换手率 &lt;1%，剔除或单独归池</li>
+            <li><b>单日数据噪声</b> — 量比仅当日有效，不进入综合得分</li>
+          </ul>
+        </div>
+
+        <div class="src-note">
+          <b>数据源说明：</b>行情取自新浪财经日线 + 中证指数成分股。β 与波动率基于近 120 个交易日计算，
+          换手率为近 20 日均值，量比为当日成交量 / 近 5 日均量。
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="vendor/echarts.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="screener.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
