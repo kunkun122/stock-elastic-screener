@@ -9,7 +9,7 @@ const $$ = (s) => Array.from(document.querySelectorAll(s));
 
 const state = {
   mode: null, snapshot: null, result: null, charts: {},
-  custom: { codes: [], rows: [], missing: [], loaded: false },
+  custom: { pool: [], rows: [], missing: [], loaded: false },
 };
 
 /* ---------- 工具 ----------
@@ -175,12 +175,20 @@ async function initApi() {
   updateStyleHint();
 }
 
-/* ============ 自选股 ============ */
+/* ============ 自选股（持久化池子，可增减） ============ */
 
-/* 切换股票池时展开/收起导入面板 */
+/* 切换股票池时展开/收起面板，并加载已保存的池子 */
 $('#selPool').addEventListener('change', () => {
   const isCustom = $('#selPool').value === '自选股';
   $('#grpCustom').classList.toggle('hidden', !isCustom);
+  if (isCustom) {
+    state.custom.pool = loadPool();
+    refreshCustomData();
+    renderPoolList();
+    if (state.custom.pool.length) {
+      toast(`已加载自选股池 ${state.custom.pool.length} 只（本地保存）`, 'ok');
+    }
+  }
 });
 
 /* 选择文件 */
@@ -197,8 +205,20 @@ $('#fileCustom').addEventListener('change', (e) => {
   reader.readAsText(f, 'UTF-8');
 });
 
-/* 导入 */
+/* 导入（合并进池子，不覆盖） */
 $('#btnImport').addEventListener('click', importCustom);
+/* 清空池子 */
+$('#btnClearPool').addEventListener('click', () => {
+  if (!state.custom.pool.length) return;
+  if (!confirm(`确定清空自选股池（${state.custom.pool.length} 只）？`)) return;
+  state.custom.pool = clearPool();
+  refreshCustomData();
+  renderPoolList();
+  $('#inpCustom').value = '';
+  $('#fileCustomName').textContent = '';
+  setCustomStatus('<span class="ok">池子已清空</span>');
+  toast('自选股池已清空');
+});
 
 function setCustomStatus(html) {
   const el = $('#hintCustom');
@@ -206,6 +226,70 @@ function setCustomStatus(html) {
   el.classList.add('show');
 }
 
+/**
+ * 池子变化后同步筛选数据：
+ *   静态模式：直接匹配快照，并把名称写回池子
+ *   API 模式：标记待重算（点「开始筛选」时调后端）
+ */
+function refreshCustomData() {
+  const codes = poolCodes(state.custom.pool);
+  if (state.mode === 'static') {
+    const { matched, missing } = matchCustom(codes, state.snapshot.rows);
+    state.custom.rows = matched;
+    state.custom.missing = missing;
+    state.custom.loaded = codes.length > 0;
+
+    // 把快照里的名称写回池子（首次导入时名称可能为空）
+    let nameChanged = false;
+    const nameMap = new Map(matched.map((r) => [r.code, r.name]));
+    state.custom.pool.forEach((x) => {
+      if (nameMap.has(x.code) && nameMap.get(x.code) !== x.name) {
+        x.name = nameMap.get(x.code);
+        nameChanged = true;
+      }
+    });
+    if (nameChanged) savePool(state.custom.pool);
+  } else {
+    state.custom.rows = [];
+    state.custom.loaded = false;   // 点筛选时由后端实时计算
+  }
+}
+
+/* 渲染池子列表 */
+function renderPoolList() {
+  const box = $('#poolList');
+  const pool = state.custom.pool;
+  $('#poolCount').textContent = pool.length;
+
+  if (!pool.length) {
+    box.innerHTML = '<div class="pool-empty">池子为空<br>上方粘贴代码或上传文件后点「导入到池子」</div>';
+    $('#poolSavedHint').textContent = '';
+    return;
+  }
+
+  box.innerHTML = pool.map((x) => `
+    <div class="pool-item">
+      <span class="p-code">${x.code}</span>
+      <span class="p-name">${x.name || '—'}</span>
+      <button type="button" class="p-del" data-code="${x.code}" title="移除">×</button>
+    </div>`).join('');
+
+  box.querySelectorAll('.p-del').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const code = btn.dataset.code;
+      state.custom.pool = removeFromPool(state.custom.pool, code);
+      savePool(state.custom.pool);
+      refreshCustomData();
+      renderPoolList();
+      const name = btn.closest('.pool-item')?.querySelector('.p-name')?.textContent || code;
+      toast(`已移除 ${name}（${code}）`);
+    });
+  });
+
+  $('#poolSavedHint').textContent = '已自动保存';
+}
+
+/* 导入：合并进池子 */
 async function importCustom() {
   const codes = extractCodes($('#inpCustom').value);
   if (!codes.length) {
@@ -214,51 +298,64 @@ async function importCustom() {
     return;
   }
 
-  state.custom = { codes, rows: [], missing: [], loaded: false };
-  setCustomStatus('正在匹配…');
+  const before = new Set(poolCodes(state.custom.pool));
+
   $('#btnImport').disabled = true;
+  setCustomStatus('正在导入…');
 
   try {
     if (state.mode === 'static') {
-      // 静态快照：只能匹配已覆盖的标的
-      const { matched, missing } = matchCustom(codes, state.snapshot.rows);
-      state.custom.rows = matched;
-      state.custom.missing = missing;
-      state.custom.loaded = true;
+      // 静态模式：先从快照拿名称，合并进池子后统一匹配
+      const additions = codes.map((c) => {
+        const hit = state.snapshot.rows.find((r) => r.code === c);
+        return { code: c, name: hit ? hit.name : '' };
+      });
+      state.custom.pool = mergePool(state.custom.pool, additions);
+      savePool(state.custom.pool);
+      refreshCustomData();
+      renderPoolList();
 
-      let html = `<span class="ok">已匹配 ${matched.length} 只</span> / 共 ${codes.length} 只`;
+      const added = codes.filter((c) => !before.has(c));
+      const { matched, missing } = state.custom;
+
+      let html = `<span class="ok">池子现有 ${state.custom.pool.length} 只</span>` +
+                 `（本次新增 ${added.length} 只，已识别 ${codes.length} 个）`;
       if (missing.length) {
-        html += `<span class="miss">未覆盖 ${missing.length} 只（不在沪深300+中证500+中证1000 内）：` +
-                `${missing.slice(0, 30).join('、')}${missing.length > 30 ? '…' : ''}</span>`;
-        html += `<span class="miss">提示：这些标的需用「本地实时版」才能实时计算</span>`;
+        html += `<span class="miss">池中有 ${missing.length} 只不在快照覆盖范围：` +
+                `${missing.slice(0, 20).join('、')}${missing.length > 20 ? '…' : ''}</span>` +
+                `<span class="miss">这些标的仅「本地实时版」能实时计算，公网版会自动跳过</span>`;
       }
       setCustomStatus(html);
-      toast(matched.length ? `已导入 ${matched.length} 只自选股` : '快照中无匹配标的',
-            matched.length ? 'ok' : 'err');
+      toast(`已合并 ${codes.length} 个代码（新增 ${added.length} 只）`, 'ok');
+      if (added.length) $('#inpCustom').value = '';
     } else {
-      // 后端实时计算
+      // API 模式：调后端计算，顺便拿名称
       const res = await fetch('/api/custom', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          codes, bench: $('#selBench').value,
-          hist_days: Number($('#selDepth').value) > 0 ? 300 : 300,
-        }),
+        body: JSON.stringify({ codes, bench: $('#selBench').value, hist_days: 300 }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.detail || '导入失败');
-      state.custom.rows = d.rows || [];
-      state.custom.missing = d.missing || [];
-      state.custom.loaded = true;
 
-      let html = `<span class="ok">已计算 ${(d.rows || []).length} 只</span> / 共 ${codes.length} 只`;
-      if (state.custom.missing.length) {
-        html += `<span class="miss">未取到行情 ${state.custom.missing.length} 只：` +
-                `${state.custom.missing.slice(0, 30).join('、')}` +
-                `${state.custom.missing.length > 30 ? '…' : ''}</span>`;
+      const nameMap = new Map((d.rows || []).map((r) => [r.code, r.name]));
+      const additions = codes.map((c) => ({ code: c, name: nameMap.get(c) || '' }));
+      state.custom.pool = mergePool(state.custom.pool, additions);
+      savePool(state.custom.pool);
+      state.custom.loaded = false;   // 池子变了，点筛选时重算
+
+      const added = codes.filter((c) => !before.has(c));
+      const miss = (d.missing || []);
+      let html = `<span class="ok">池子现有 ${state.custom.pool.length} 只</span>` +
+                 `（本次新增 ${added.length} 只）`;
+      if (miss.length) {
+        html += `<span class="miss">未取到行情 ${miss.length} 只：` +
+                `${miss.slice(0, 20).join('、')}${miss.length > 20 ? '…' : ''}</span>`;
       }
       setCustomStatus(html);
-      toast(`已导入 ${(d.rows || []).length} 只自选股`, 'ok');
+      renderPoolList();
+      toast(`已合并 ${codes.length} 个代码（新增 ${added.length} 只）`, 'ok');
+      if (added.length) $('#inpCustom').value = '';
     }
   } catch (e) {
     setCustomStatus(`<span class="warn">导入失败：${e.message}</span>`);
@@ -318,15 +415,16 @@ async function doScreen() {
   const isCustom = params.pool === '自选股';
 
   if (state.mode === 'static') {
-    // 自选股：改用导入后的数据，且必须先导入
+    // 自选股：用持久池子（选「自选股」时已自动加载）
     if (isCustom) {
-      if (!state.custom.loaded) {
+      if (!state.custom.pool.length) {
         $('#emptyState').classList.remove('hidden');
-        toast('请先在「自选股代码」框粘贴代码并点击「导入」', 'err');
+        toast('自选股池为空，请先粘贴代码导入', 'err');
         return;
       }
+      if (!state.custom.loaded) refreshCustomData();
       if (!state.custom.rows.length) {
-        return showEmpty({ message: '导入的自选股在快照中无匹配，请用本地实时版计算' });
+        return showEmpty({ message: '池内标的不在快照覆盖范围，请用本地实时版计算' });
       }
     }
     const src = isCustom ? state.custom.rows : state.snapshot.rows;
@@ -355,19 +453,20 @@ async function doScreen() {
 
   // 自选股走专用接口（后端实时计算任意 A 股）
   if (isCustom) {
-    if (!state.custom.codes.length) {
+    const codes = poolCodes(state.custom.pool);
+    if (!codes.length) {
       $('#loading').classList.add('hidden');
       $('#emptyState').classList.remove('hidden');
-      toast('请先导入自选股代码', 'err');
+      toast('自选股池为空，请先导入代码', 'err');
       $('#btnScreen').disabled = false;
       return;
     }
-    $('#loadingText').textContent = `正在计算 ${state.custom.codes.length} 只自选股…`;
+    $('#loadingText').textContent = `正在计算 ${codes.length} 只自选股…`;
     try {
       const res = await fetch('/api/custom', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          codes: state.custom.codes,
+          codes,
           bench: params.bench,
           params,          // 由后端复用同一套过滤与打分逻辑
           hist_days: 300,
