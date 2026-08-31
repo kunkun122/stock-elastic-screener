@@ -49,17 +49,27 @@
 
     <!-- 自选股导入（选「自选股」时展开） -->
     <div class="form-group hidden" id="grpCustom">
-      <label>自选股代码</label>
-      <textarea id="inpCustom" rows="6"
-        placeholder="粘贴代码，逗号 / 空格 / 顿号 / 换行均可&#10;支持 600000、sh600000、600000.SH&#10;例：600519, 000858 300750&#10;　　601318、002594"></textarea>
+      <label>添加到自选股池</label>
+      <textarea id="inpCustom" rows="4"
+        placeholder="粘贴代码，逗号 / 空格 / 顿号 / 换行均可&#10;支持 600000、sh600000、600000.SH&#10;导入会合并进池子，不会覆盖"></textarea>
 
       <div class="import-row">
         <input type="file" id="fileCustom" accept=".txt,.csv,.tsv" class="hidden">
         <button type="button" id="btnPickFile" class="btn-mini">选择文件</button>
-        <button type="button" id="btnImport" class="btn-mini primary">导入</button>
+        <button type="button" id="btnImport" class="btn-mini primary">导入到池子</button>
       </div>
       <div class="hint" id="fileCustomName"></div>
       <div class="custom-status" id="hintCustom"></div>
+
+      <!-- 自选股池（持久保存，可增减） -->
+      <div class="pool-box" id="poolBox">
+        <div class="pool-head">
+          <span>自选股池 · <b id="poolCount">0</b> 只</span>
+          <span class="muted" id="poolSavedHint"></span>
+          <button type="button" id="btnClearPool" class="btn-mini danger">清空</button>
+        </div>
+        <div class="pool-list" id="poolList"></div>
+      </div>
     </div>
 
     <div class="form-group">
