@@ -257,7 +257,75 @@ function matchCustom(codes, rows) {
   return { matched, missing };
 }
 
+/* ============ 自选股池（localStorage 持久化） ============ */
+
+const POOL_KEY = 'elastic_custom_pool_v1';
+
+/* 读取池子，返回 [{code, name}]；异常（隐私模式等）返回空数组 */
+function loadPool() {
+  try {
+    const raw = window.localStorage.getItem(POOL_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((x) => x && isValidCode(x.code))
+      .map((x) => ({ code: x.code, name: x.name || '' }));
+  } catch (e) {
+    return [];
+  }
+}
+
+/* 保存池子；异常静默（返回是否成功） */
+function savePool(pool) {
+  try {
+    window.localStorage.setItem(POOL_KEY, JSON.stringify(pool));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * 合并导入：additions 为 [{code, name?}]。
+ * 已存在的更新名称（若有），不存在的追加。返回新池子（新数组）。
+ */
+function mergePool(pool, additions) {
+  const map = new Map(pool.map((x) => [x.code, { ...x }]));
+  for (const a of additions || []) {
+    if (!a || !isValidCode(a.code)) continue;
+    const cur = map.get(a.code);
+    if (cur) {
+      if (a.name) cur.name = a.name;
+    } else {
+      map.set(a.code, { code: a.code, name: a.name || '' });
+    }
+  }
+  return Array.from(map.values());
+}
+
+/* 从池子删除一个代码，返回新池子 */
+function removeFromPool(pool, code) {
+  return pool.filter((x) => x.code !== code);
+}
+
+/* 清空池子（返回空数组并持久化） */
+function clearPool() {
+  savePool([]);
+  return [];
+}
+
+/* 池子内代码列表 */
+function poolCodes(pool) {
+  return (pool || []).map((x) => x.code);
+}
+
 /* 暴露给 app.js 复用 */
 window.isNum = isNum;
 window.isValidCode = isValidCode;
 window.extractCodes = extractCodes;
+window.loadPool = loadPool;
+window.savePool = savePool;
+window.mergePool = mergePool;
+window.removeFromPool = removeFromPool;
+window.clearPool = clearPool;
+window.poolCodes = poolCodes;
