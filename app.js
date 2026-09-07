@@ -916,15 +916,17 @@ function renderBacktest() {
 
   let html =
     '<div class="bt-intro">' +
-    '<b>这是对打分体系的前瞻检验</b>：在 T-20 / T-60 天前的历史截面上，' +
-    '只用<b>当时可见的数据</b>重新打分，再统计这些标的<b>之后的实际涨跌幅</b>，按得分五分位分组（Q1 最高、Q5 最低）。' +
+    '<b>这是对打分体系的前瞻检验</b>：在 T-3 / T-5 / T-10 / T-20 / T-60 天前的历史截面上，' +
+    '只用<b>当时可见的数据</b>重新打分，再统计这些标的<b>之后的实际涨跌幅</b>。' +
+    '短窗口（3/5/10 日）侧重 <b>Top30 等权组合</b>的短线跟踪，长窗口（20/60 日）附五分位分组（Q1 最高、Q5 最低）验证打分区分度。' +
     '<br>看两件事：① 分组收益是否呈<b>单调阶梯</b>（是 → 打分确实区分出了弹性）；' +
-    '② 结合下方<b>基准同期方向</b>解读——<span class="hl">高弹性是市场方向的放大器，不是方向本身</span>：' +
-    '基准上涨时 Q1 应跑赢，基准下跌时 Q1 放大亏损属于正常兑现。' +
-    '<br>样本约 1799 只（沪深300+中证500+中证1000），等权统计，未计交易成本。</div>';
+    '② 结合各窗口<b>基准同期方向</b>解读——<span class="hl">高弹性是市场方向的放大器，不是方向本身</span>：' +
+    '基准上涨时高分组合应跑赢，基准下跌时放大亏损属于正常兑现。' +
+    '<br>样本为全市场 A 股（剔除 ST 与北交所），等权统计，未计交易成本。</div>';
 
   let chartDefs = [];
-  [['20', '近一个月'], ['60', '近一个季度']].forEach(([k, tag]) => {
+  [['3', '3 日后'], ['5', '5 日后'], ['10', '10 日后'],
+   ['20', '近一个月'], ['60', '近一个季度']].forEach(([k, tag]) => {
     const w = wins[k];
     if (!w) return;
     const t30 = w.top30;
@@ -934,7 +936,7 @@ function renderBacktest() {
     const benchUp = (w.bench_ret || 0) >= 0;
 
     html += `<div class="card" style="margin-bottom:16px">` +
-      `<div class="card-title">${w.label}（${tag}）</div>` +
+      `<div class="card-title">${w.label}（${tag}）${w.short_term ? '　<span style="color:var(--warn);font-size:11.5px">短线窗口 · 看 Top30</span>' : ''}</div>` +
       `<div class="bt-meta">` +
       `<span>截面起点 <b>${w.from_date || '—'}</b></span>` +
       `<span>样本 <b>${w.samples}</b> 只</span>` +
