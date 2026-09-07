@@ -888,7 +888,135 @@ $$('.tab').forEach((t) => t.addEventListener('click', () => {
   $$('.tab-page').forEach((x) => x.classList.remove('active'));
   t.classList.add('active');
   $('#tab-' + t.dataset.tab).classList.add('active');
+  if (t.dataset.tab === 'validate') renderBacktestOnce();
   setTimeout(() => Object.values(state.charts).forEach((c) => c && c.resize()), 60);
 }));
+
+/* ---------- 打分验证（历史截面回测） ---------- */
+let btRendered = false;
+
+function renderBacktestOnce() {
+  if (btRendered) return;
+  btRendered = true;
+  renderBacktest();
+}
+
+function renderBacktest() {
+  const box = $('#btContent');
+  if (state.mode !== 'static' || !state.snapshot || !state.snapshot.backtest) {
+    box.innerHTML =
+      '<div class="empty"><div class="empty-icon">◎</div>' +
+      '<p>打分验证需要数据快照（历史截面回测）</p>' +
+      '<p class="muted">公网静态版自带；本地实时版请先运行 backend/generate_snapshot.py 生成快照</p></div>';
+    return;
+  }
+
+  const bt = state.snapshot.backtest;
+  const wins = bt.windows || {};
+
+  let html =
+    '<div class="bt-intro">' +
+    '<b>这是对打分体系的前瞻检验</b>：在 T-20 / T-60 天前的历史截面上，' +
+    '只用<b>当时可见的数据</b>重新打分，再统计这些标的<b>之后的实际涨跌幅</b>，按得分五分位分组（Q1 最高、Q5 最低）。' +
+    '<br>看两件事：① 分组收益是否呈<b>单调阶梯</b>（是 → 打分确实区分出了弹性）；' +
+    '② 结合下方<b>基准同期方向</b>解读——<span class="hl">高弹性是市场方向的放大器，不是方向本身</span>：' +
+    '基准上涨时 Q1 应跑赢，基准下跌时 Q1 放大亏损属于正常兑现。' +
+    '<br>样本约 1799 只（沪深300+中证500+中证1000），等权统计，未计交易成本。</div>';
+
+  let chartDefs = [];
+  [['20', '近一个月'], ['60', '近一个季度']].forEach(([k, tag]) => {
+    const w = wins[k];
+    if (!w) return;
+    const t30 = w.top30;
+    const q1 = (w.groups || [])[0] || {};
+    const q5 = (w.groups || [])[(w.groups || []).length - 1] || {};
+    const spread = (isNum(q1.avg) && isNum(q5.avg)) ? (q1.avg - q5.avg) : null;
+    const benchUp = (w.bench_ret || 0) >= 0;
+
+    html += `<div class="card" style="margin-bottom:16px">` +
+      `<div class="card-title">${w.label}（${tag}）</div>` +
+      `<div class="bt-meta">` +
+      `<span>截面起点 <b>${w.from_date || '—'}</b></span>` +
+      `<span>样本 <b>${w.samples}</b> 只</span>` +
+      `<span>基准同期 <b class="${benchUp ? 'up' : 'down'}">${fmt(w.bench_ret)}%</b></span>` +
+      (spread !== null ? `<span>Q1−Q5 差 <b>${spread >= 0 ? '+' : ''}${fmt(spread)}%</b></span>` : '') +
+      `</div>` +
+      `<div id="btChart${k}" class="chart" style="height:280px"></div>` +
+      `<table class="bt-tbl"><thead><tr>` +
+      `<th>分组（按截面得分）</th><th>平均涨跌</th><th>中位数</th><th>跑赢基准比例</th><th>样本数</th>` +
+      `</tr></thead><tbody>` +
+      (w.groups || []).map((g) =>
+        `<tr><td>${g.g}</td>` +
+        `<td class="${g.avg >= 0 ? 'up' : 'down'}">${g.avg >= 0 ? '+' : ''}${fmt(g.avg)}%</td>` +
+        `<td class="${g.med >= 0 ? 'up' : 'down'}">${g.med >= 0 ? '+' : ''}${fmt(g.med)}%</td>` +
+        `<td>${fmt(g.win, 1)}%</td><td>${g.n}</td></tr>`).join('') +
+      `<tr><td><b>Top30 等权组合</b></td>` +
+      `<td class="${t30.ret >= 0 ? 'up' : 'down'}"><b>${t30.ret >= 0 ? '+' : ''}${fmt(t30.ret)}%</b></td>` +
+      `<td>—</td><td>${fmt(t30.win, 1)}%</td><td>30</td></tr>` +
+      `</tbody></table>` +
+      `<details class="bt-top"><summary>Top30 组合明细（${t30.stocks.length} 只，超额 ` +
+      `${t30.vs_bench >= 0 ? '+' : ''}${fmt(t30.vs_bench)}%）</summary>` +
+      `<div class="bt-top-list">` +
+      t30.stocks.map((s) =>
+        `<div class="row"><span class="c">${s.code}</span><span class="n">${s.name}</span>` +
+        `<span class="s">${fmt(s.score, 1)}分</span>` +
+        `<span class="r ${s.fwd >= 0 ? 'up' : 'down'}">${s.fwd >= 0 ? '+' : ''}${fmt(s.fwd)}%</span></div>`
+      ).join('') +
+      `</div></details></div>`;
+    chartDefs.push([k, w]);
+  });
+
+  if (!chartDefs.length) {
+    box.innerHTML = '<div class="empty"><div class="empty-icon">◎</div><p>回测样本不足</p></div>';
+    return;
+  }
+
+  box.innerHTML = html;
+
+  // 柱状图：各组平均涨跌 vs 基准线（红涨绿跌）
+  chartDefs.forEach(([k, w]) => {
+    const groups = w.groups || [];
+    const cats = groups.map((g, i) => {
+      const q = g.g.split(' ')[0];
+      if (i === 0) return q + ' 最高';
+      if (i === groups.length - 1) return q + ' 最低';
+      return q;
+    });
+    cats.push('Top30');
+    const vals = groups.map((g) => g.avg).concat([w.top30.ret]);
+
+    chart('btChart' + k, {
+      ...baseOpt(),
+      grid: { left: 56, right: 20, top: 30, bottom: 34 },
+      tooltip: {
+        ...baseOpt().tooltip,
+        formatter: (p) => `${p.name}<br/>平均涨跌：<b>${p.value >= 0 ? '+' : ''}${fmt(p.value)}%</b>` +
+          `<br/>基准：${fmt(w.bench_ret)}%`,
+      },
+      xAxis: { ...AXIS, type: 'category', data: cats,
+               axisLabel: { color: '#8b949e', fontSize: 11, interval: 0 } },
+      yAxis: {
+        ...AXIS, type: 'value',
+        axisLabel: { ...AXIS.axisLabel, formatter: '{value}%' },
+      },
+      series: [{
+        type: 'bar', data: vals, barMaxWidth: 42,
+        itemStyle: {
+          borderRadius: [4, 4, 0, 0],
+          color: (p) => (p.value >= 0 ? '#f85149' : '#3fb950'),
+        },
+        label: { show: true, position: 'top', color: '#8b949e', fontSize: 10.5,
+                 formatter: (p) => (p.value >= 0 ? '+' : '') + Number(p.value).toFixed(1) },
+        markLine: {
+          symbol: 'none', silent: true,
+          data: [{ yAxis: w.bench_ret }],
+          lineStyle: { color: '#d29922', type: 'dashed', width: 1.5 },
+          label: { formatter: `基准 ${fmt(w.bench_ret)}%`, color: '#d29922', fontSize: 10.5,
+                   position: 'insideEndTop' },
+        },
+      }],
+    });
+  });
+}
 
 boot();
