@@ -107,7 +107,21 @@ const COLS = [
   ['amplitude', '振幅(%)'], ['turnover', '换手率(%)'], ['volume_ratio', '量比'],
   ['bb_width', '布林带宽'], ['bb_pct', '带宽分位'], ['range_amp', '区间幅度(%)'],
   ['ret60', '近60日涨跌(%)'], ['elastic_score', '综合得分'], ['shape', '形态信号'],
+  ['open3', '开3日(%)'], ['open5', '开5日(%)'],
+  ['open10', '开10日(%)'], ['open20', '开20日(%)'],
 ];
+
+/* 把 open_ret {3:x,5:x} 展平为 open3/open5/... 扁平字段（导出与通用处理用） */
+function flattenOpenRet(rows) {
+  return rows.map((r) => {
+    if (!r.open_ret) return r;
+    const o = r.open_ret;
+    const rest = { ...r };
+    delete rest.open_ret;
+    return { ...rest, open3: o['3'], open5: o['5'], open10: o['10'], open20: o['20'] };
+  });
+}
+window.flattenOpenRet = flattenOpenRet;
 
 const SCORE_COLS = [
   ['code', '代码'], ['name', '名称'],
@@ -132,9 +146,10 @@ function _widths(ws, nCol) {
   }));
 }
 
-function exportXlsx(rows, params, meta) {
+function exportXlsx(rowsRaw, params, meta) {
   if (typeof XLSX === 'undefined') throw new Error('Excel 库未加载');
   const wb = XLSX.utils.book_new();
+  const rows = flattenOpenRet(rowsRaw);
 
   // Sheet1 标的清单
   const cols = COLS.filter(([k]) => rows.some((r) => r[k] !== undefined));
