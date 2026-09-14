@@ -643,6 +643,7 @@ function renderPie(rows) {
 const SHAPE_CLS = { '潜在变盘': 'turn', '趋势进行中': 'trend', '区间震荡': 'range' };
 
 function renderTable(rows) {
+  const hasOpen = rows.some((r) => r.open_ret && Object.values(r.open_ret).some(isNum));
   const cols = [
     ['rank', '排名'], ['code', '代码'], ['name', '名称'], ['price', '现价'],
     ['pct_chg', '涨跌幅%'], ['float_mv', '流通市值(亿)'], ['beta', 'β'],
@@ -651,10 +652,14 @@ function renderTable(rows) {
     ['range_amp', '区间幅度%'], ['ret60', '60日涨跌%'],
     ['elastic_score', '综合得分'], ['shape', '形态'],
   ];
+  if (hasOpen) cols.push(['open3', '开3日%'], ['open5', '开5日%'],
+                         ['open10', '开10日%'], ['open20', '开20日%']);
   $('#tblHead').innerHTML = cols.map(([, t]) => `<th>${t}</th>`).join('');
   $('#tblBody').innerHTML = rows.map((r) => {
     const td = (k, d = 2, colorize = false) =>
       `<td class="${colorize ? cls(r[k]) : ''}">${fmt(r[k], d)}</td>`;
+    const od = (v) => (!isNum(v) ? '<td>—</td>' :
+      `<td class="${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '+' : ''}${fmt(v, 1)}</td>`);
     return `<tr>
       <td>${r.rank ?? '-'}</td>
       <td class="code">${r.code}</td>
@@ -665,6 +670,8 @@ function renderTable(rows) {
       ${td('bb_pct', 0)}${td('range_amp', 1)}${td('ret60', 2, true)}
       <td><span class="score-bar">${fmt(r.elastic_score, 1)}</span></td>
       <td><span class="tag ${SHAPE_CLS[r.shape] || 'range'}">${r.shape || '—'}</span></td>
+      ${hasOpen ? (od(r.open_ret?.['3']) + od(r.open_ret?.['5']) +
+                   od(r.open_ret?.['10']) + od(r.open_ret?.['20'])) : ''}
     </tr>`;
   }).join('');
 }
