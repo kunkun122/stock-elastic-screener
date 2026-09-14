@@ -365,6 +365,11 @@ details.bt-top summary:hover{color:var(--tx)}
 .bt-top-list .n{flex:1}
 .bt-top-list .s{width:56px;text-align:right;color:var(--tx3)}
 .bt-top-list .r{width:80px;text-align:right;font-weight:500}
+.hist-sel{
+  background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:6px;
+  padding:4px 10px;font-size:12px;font-family:inherit;cursor:pointer;outline:none;margin-left:6px;
+}
+.hist-sel:focus{border-color:var(--accent)}
 
 /* ---------- Toast ---------- */
 .toast{
