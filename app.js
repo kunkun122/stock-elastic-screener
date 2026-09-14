@@ -1079,6 +1079,72 @@ function renderBacktest() {
       }],
     });
   });
+
+  // ---- 历史记录浏览器（每日 Top30 留档，随数据更新累积） ----
+  renderHistoryBrowser();
+}
+
+/* ---------- 历史每日 Top30 浏览器 ---------- */
+let histData = null;
+
+async function renderHistoryBrowser() {
+  const host = document.getElementById('histHost');
+  if (!host) return;
+  if (state.mode !== 'static') {
+    host.innerHTML = '';
+    return;
+  }
+  if (!histData) {
+    host.innerHTML = '<div class="card"><div class="card-title">历史每日 Top30</div>' +
+      '<div class="empty" style="padding:20px 0"><p class="muted">正在加载历史记录…</p></div></div>';
+    try {
+      const r = await fetch('data/history.json', { cache: 'no-store' });
+      histData = r.ok ? await r.json() : [];
+    } catch (e) {
+      histData = [];
+    }
+  }
+  if (!histData || !histData.length) {
+    host.innerHTML = '<div class="card"><div class="card-title">历史每日 Top30</div>' +
+      '<div class="empty" style="padding:20px 0"><p class="muted">暂无历史记录，每天收盘更新后自动累积</p></div></div>';
+    return;
+  }
+
+  const days = [...histData].reverse();   // 最近在前
+  host.innerHTML =
+    `<div class="card" style="margin-bottom:16px">` +
+    `<div class="card-title">历史每日 Top30（共 ${days.length} 天）</div>` +
+    `<div class="bt-meta">` +
+    `<span>查看日期 <select id="histDate" class="hist-sel">` +
+    days.map((d) => `<option value="${d.date}">${d.date}</option>`).join('') +
+    `</select></span>` +
+    `<span id="histDiffInfo" class="muted"></span></div>` +
+    `<table class="bt-tbl"><thead><tr>` +
+    `<th>#</th><th>代码</th><th>名称</th><th>得分</th><th>形态</th><th>备注</th>` +
+    `</tr></thead><tbody id="histBody"></tbody></table></div>`;
+
+  const sel = document.getElementById('histDate');
+  const paint = () => {
+    const d = histData.find((x) => x.date === sel.value);
+    if (!d) return;
+    const newCodes = new Set((d.diff && d.diff.new_in || []).map((t) => t.code));
+    document.getElementById('histBody').innerHTML = (d.top30 || []).map((t, i) =>
+      `<tr><td>${i + 1}</td><td style="font-family:ui-monospace,monospace">${t.code}</td>` +
+      `<td>${t.name}</td><td>${fmt(t.score, 1)}</td>` +
+      `<td>${t.shape || '—'}</td>` +
+      `<td>${newCodes.has(t.code) ? '<span style="color:var(--up)">▲ 新进</span>' : ''}</td></tr>`
+    ).join('');
+    const info = document.getElementById('histDiffInfo');
+    if (d.diff) {
+      info.innerHTML = `新进 <b style="color:var(--up)">${(d.diff.new_in || []).length}</b>` +
+        ` / 移出 <b style="color:var(--down)">${(d.diff.removed || []).length}</b>` +
+        ` / 留任 <b>${d.diff.unchanged}</b>（对比 ${d.diff.prev_date}）`;
+    } else {
+      info.textContent = '';
+    }
+  };
+  sel.addEventListener('change', paint);
+  paint();
 }
 
 boot();
