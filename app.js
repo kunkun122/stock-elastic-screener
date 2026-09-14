@@ -924,6 +924,59 @@ function renderBacktest() {
     '基准上涨时高分组合应跑赢，基准下跌时放大亏损属于正常兑现。' +
     '<br>样本为全市场 A 股（剔除 ST 与北交所），等权统计，未计交易成本。</div>';
 
+  // ---- 今日 Top30 变动（对比最近一次存档） ----
+  const diff = bt.top30_diff;
+  if (diff) {
+    html += `<div class="card" style="margin-bottom:16px">` +
+      `<div class="card-title">今日 Top30 变动（对比 ${diff.prev_date}）</div>` +
+      `<div class="bt-meta">` +
+      `<span>新进 <b style="color:var(--up)">${(diff.new_in || []).length}</b> 只</span>` +
+      `<span>移出 <b style="color:var(--down)">${(diff.removed || []).length}</b> 只</span>` +
+      `<span>留任 <b>${diff.unchanged}</b> 只</span></div>` +
+      (diff.new_in && diff.new_in.length
+        ? `<div style="font-size:12px;margin:6px 0"><span style="color:var(--up)">▲ 新进：</span>` +
+          diff.new_in.map((t) => `${t.name}(${t.code})`).join('、') + `</div>` : '') +
+      (diff.removed && diff.removed.length
+        ? `<div style="font-size:12px;margin:6px 0"><span style="color:var(--down)">▼ 移出：</span>` +
+          diff.removed.map((t) => `${t.name}(${t.code})`).join('、') + `</div>` : '') +
+      `</div>`;
+  }
+
+  // ---- Top30 个股维度 · 次日开盘买入胜率 ----
+  const t30o = bt.top30_open;
+  if (t30o) {
+    const openRows = [['3', '3 日'], ['5', '5 日'], ['10', '10 日'], ['20', '20 日']]
+      .map(([k, tag]) => [k, t30o[k], tag]).filter(([, w]) => w);
+    if (openRows.length) {
+      html += `<div class="card" style="margin-bottom:16px">` +
+        `<div class="card-title">Top30 个股维度 · 信号次日开盘买入胜率</div>` +
+        `<div class="bt-meta"><span>口径：T-k 信号日<b>次日开盘价</b>买入 → 最新收盘，按<b>个股</b>统计</span></div>` +
+        `<table class="bt-tbl"><thead><tr>` +
+        `<th>窗口</th><th>上涨比例</th><th>跑赢基准比例</th><th>等权均值</th><th>中位数</th><th>基准同期</th><th>样本</th>` +
+        `</tr></thead><tbody>` +
+        openRows.map(([k, w, tag]) =>
+          `<tr><td><b>${tag}</b></td>` +
+          `<td class="${w.win >= 50 ? 'up' : 'down'}"><b>${fmt(w.win, 1)}%</b></td>` +
+          `<td class="${w.vs_bench >= 50 ? 'up' : 'down'}">${fmt(w.vs_bench, 1)}%</td>` +
+          `<td class="${w.avg >= 0 ? 'up' : 'down'}">${w.avg >= 0 ? '+' : ''}${fmt(w.avg)}%</td>` +
+          `<td class="${w.med >= 0 ? 'up' : 'down'}">${w.med >= 0 ? '+' : ''}${fmt(w.med)}%</td>` +
+          `<td class="${w.bench_ret >= 0 ? 'up' : 'down'}">${fmt(w.bench_ret)}%</td>` +
+          `<td>${w.n}</td></tr>`).join('') +
+        `</tbody></table>`;
+      openRows.forEach(([k, w, tag]) => {
+        html += `<details class="bt-top"><summary>${tag}窗口个股明细（${w.n} 只，上涨比例 ${fmt(w.win, 1)}%）</summary>` +
+          `<div class="bt-top-list">` +
+          w.stocks.map((s) =>
+            `<div class="row"><span class="c">${s.code}</span><span class="n">${s.name}</span>` +
+            `<span class="s">${fmt(s.score, 1)}分</span>` +
+            `<span class="r ${s.ret >= 0 ? 'up' : 'down'}">${s.ret >= 0 ? '+' : ''}${fmt(s.ret)}%</span></div>`
+          ).join('') +
+          `</div></details>`;
+      });
+      html += `</div>`;
+    }
+  }
+
   let chartDefs = [];
   [['3', '3 日后'], ['5', '5 日后'], ['10', '10 日后'],
    ['20', '近一个月'], ['60', '近一个季度']].forEach(([k, tag]) => {
